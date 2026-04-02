@@ -7,15 +7,23 @@
   "raw_text": "...",
   "sections": {
     "skills": [],
-    "experience": [],
-    "projects": []
+    "experience": []
   }
 }
 
 ### Output (final response)
 {
   "ats_score": 50,
-  "alignment": {},
-  "skills": {},
-  "content_quality": {}
+  "alignment": {
+    "similarity_score": 0.0,
+    "matched_keywords": [],
+    "missing_keywords": []
+  },
+  "skills": {
+    "validated_skills": [],
+    "missing_skills": []
+  },
+  "content_quality": {
+    "bullet_scores": []
+  }
 }

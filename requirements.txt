@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pymupdf
+sentence-transformers
+keybert
+scikit-learn
+numpy
+torch

@@ -27,3 +27,13 @@
     "bullet_scores": []
   }
 }
+
+## How to run
+Install dependencies:
+pip install -r requirements.txt
+
+Run the server:
+uvicorn app.main:app --reload
+
+Open:
+http://127.0.0.1:8000/docs

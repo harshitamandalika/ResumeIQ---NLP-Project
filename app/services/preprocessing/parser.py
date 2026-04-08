@@ -39,6 +39,26 @@ def extract_skills_from_section(skills_lines):
     return list(set(skills))
 
 
+def merge_wrapped_lines(lines):
+    merged_lines = []
+
+    for line in lines:
+        cleaned_line = line.strip()
+        if not cleaned_line:
+            continue
+
+        if not merged_lines:
+            merged_lines.append(cleaned_line)
+            continue
+
+        if len(cleaned_line) < 25 or merged_lines[-1].endswith(("by", "with", "using")):
+            merged_lines[-1] = f"{merged_lines[-1].rstrip()} {cleaned_line}"
+        else:
+            merged_lines.append(cleaned_line)
+
+    return merged_lines
+
+
 # Section-based parsing
 def extract_sections(text):
     sections = {
@@ -53,9 +73,9 @@ def extract_sections(text):
 
     # Section keywords 
     section_map = {
-        "skills": ["skills"],
-        "experience": ["experience", "work experience", "professional experience"],
-        "projects": ["projects", "project"],
+        "skills": ["skills", "technical skills", "core skills"],
+        "experience": ["experience", "work experience", "professional experience", "work history"],
+        "projects": ["projects", "project", "academic projects"],
         "education": ["education"]
     }
 
@@ -90,18 +110,18 @@ def extract_sections(text):
 
     # Combine EXPERIENCE + PROJECTS
     combined_exp = extracted["experience"] + extracted["projects"]
+    combined_exp = merge_wrapped_lines(combined_exp)
 
     # Clean experience lines
     cleaned_exp = []
     for line in combined_exp:
         line = line.strip()
 
-        # Remove very short / noisy lines
-        if len(line) < 25:
-            continue
-
         # Remove obvious headers
         if line.lower() in ["skills", "education", "projects"]:
+            continue
+
+        if len(line) < 15:
             continue
 
         cleaned_exp.append(line)

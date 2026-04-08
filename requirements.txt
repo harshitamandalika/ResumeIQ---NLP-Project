@@ -6,3 +6,4 @@ keybert
 scikit-learn
 numpy
 torch
+python-multipart

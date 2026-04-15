@@ -3,4 +3,6 @@ __pycache__/
 .env
 .DS_Store
 *.log
-data/
+data/*
+!data/sample_resumes/
+!data/sample_resumes/AI_Engineer_Sample_Resume.pdf

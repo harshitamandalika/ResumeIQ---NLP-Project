@@ -5,4 +5,4 @@ __pycache__/
 *.log
 data/*
 !data/sample_resumes/
-!data/sample_resumes/ai_engineer_sample_resume.pdf
+!data/sample_resumes/AI_Engineer_Sample_Resume.pdf

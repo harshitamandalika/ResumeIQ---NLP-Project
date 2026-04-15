@@ -6,3 +6,5 @@ keybert
 scikit-learn
 numpy
 torch
+google-generativeai
+python-dotenv

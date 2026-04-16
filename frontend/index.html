@@ -1,83 +1,178 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ResumeIQ</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ResumeIQ — ATS Resume Optimizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500&family=Instrument+Sans:wght@400;500&family=JetBrains+Mono&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-    <main class="shell">
-        <section class="hero">
-            <h1>ResumeIQ</h1>
-            <p class="hero-copy">
-                Upload a resume, paste a target job description, and review the ATS score,
-                keyword coverage, supported skills, and bullet level feedback in one place.
+    <div id="page-upload" class="page active">
+        <nav>
+            <div class="logo">Resume<em>IQ</em></div>
+            <div class="nav-tag">NLP · ATS Optimizer</div>
+        </nav>
+
+        <div class="upload-shell">
+            <p class="eyebrow">TAMU · NLP Course Project</p>
+            <h1 class="upload-title">Get your resume past the filter.</h1>
+            <p class="upload-sub">
+                Upload a PDF resume and paste the job description. ResumeIQ scores your
+                alignment, validates your skills, and rewrites weak bullets.
             </p>
-        </section>
 
-        <section class="panel form-panel">
-            <form id="analyze-form">
-                <label class="field-label" for="resume">Resume PDF</label>
-                <input id="resume" name="resume" type="file" accept=".pdf" required>
-
-                <label class="field-label" for="job_description">Job description</label>
-                <textarea
-                    id="job_description"
-                    name="job_description"
-                    rows="12"
-                    placeholder="Paste the target job description here"
-                    required
-                ></textarea>
-
-                <div class="actions">
-                    <button id="submit-button" type="submit">Analyze Resume</button>
-                    <button id="load-sample" type="button" class="secondary">Load sample job description</button>
+            <div class="upload-cols">
+                <div class="upload-panel">
+                    <span class="panel-label">Resume — PDF only</span>
+                    <div
+                        class="drop-zone"
+                        id="drop-zone"
+                        onclick="document.getElementById('file-input').click()"
+                        ondragover="handleDragOver(event)"
+                        ondragleave="handleDragLeave(event)"
+                        ondrop="handleDrop(event)"
+                    >
+                        <div class="drop-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 15V3m0 12-4-4m4 4 4-4"/>
+                                <path d="M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/>
+                            </svg>
+                        </div>
+                        <p class="drop-title">Drop resume here</p>
+                        <p class="drop-hint">or click to browse &middot; PDF</p>
+                        <input type="file" id="file-input" name="resume" accept=".pdf" />
+                    </div>
+                    <div class="file-pill" id="file-pill">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span id="file-name">file.pdf</span>
+                    </div>
                 </div>
-            </form>
-            <p id="status" class="status"></p>
-        </section>
 
-        <section id="results" class="results hidden">
-            <div class="score-card panel">
-                <p class="score-label">ATS Score</p>
-                <p id="ats-score" class="score-value">0</p>
-                <p class="score-note">The score combines semantic alignment, keyword coverage, skill coverage, and bullet quality.</p>
+                <div class="upload-panel">
+                    <span class="panel-label">Job Description</span>
+                    <textarea
+                        class="jd-field"
+                        id="jd-field"
+                        name="job_description"
+                        placeholder="Paste the full job description here — include responsibilities, requirements, and qualifications for the best analysis…"
+                    ></textarea>
+                    <button class="btn-sample" id="load-sample" type="button">
+                        Load sample job description
+                    </button>
+                </div>
             </div>
 
-            <div class="grid-two">
-                <article class="panel">
-                    <h2>Alignment</h2>
-                    <p id="similarity-score" class="metric"></p>
-                    <div>
-                        <h3 class="subsection-title">Matched keywords</h3>
-                        <div id="matched-keywords" class="tag-group"></div>
-                    </div>
-                    <div>
-                        <h3 class="subsection-title">Missing keywords</h3>
-                        <div id="missing-keywords" class="tag-group"></div>
-                    </div>
-                </article>
+            <div class="error-banner" id="error-banner"></div>
+            <button class="btn-primary" id="btn-analyze" disabled>
+                Analyze Resume
+            </button>
+        </div>
+    </div>
 
-                <article class="panel">
-                    <h2>Skills</h2>
-                    <div>
-                        <h3 class="subsection-title">Supported skills</h3>
-                        <div id="validated-skills" class="stack"></div>
-                    </div>
-                    <div>
-                        <h3 class="subsection-title">Missing skills</h3>
-                        <div id="missing-skills" class="tag-group"></div>
-                    </div>
-                </article>
+    <div id="page-loading" class="page">
+        <nav>
+            <div class="logo">Resume<em>IQ</em></div>
+            <div class="nav-tag">Analyzing&hellip;</div>
+        </nav>
+
+        <div class="loading-shell">
+            <div class="spinner"></div>
+            <h2 class="loading-title">Analyzing your resume</h2>
+            <p class="loading-sub">This may take 10&ndash;30 seconds while NLP models load</p>
+            <ul class="step-list" id="step-list">
+                <li id="s0"><span class="step-dot"></span>Parsing resume document</li>
+                <li id="s1"><span class="step-dot"></span>Computing semantic similarity (SentenceBERT)</li>
+                <li id="s2"><span class="step-dot"></span>Extracting keywords (TF-IDF / KeyBERT)</li>
+                <li id="s3"><span class="step-dot"></span>Validating skill evidence</li>
+                <li id="s4"><span class="step-dot"></span>Scoring bullet strength</li>
+                <li id="s5"><span class="step-dot"></span>Generating rewrite suggestions</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="page-results" class="page">
+        <nav>
+            <div class="logo">Resume<em>IQ</em></div>
+            <div class="nav-tag">Analysis Complete</div>
+        </nav>
+
+        <div class="results-bar">
+            <div>
+                <h2 class="results-title">Analysis Report</h2>
+                <p class="results-meta" id="results-meta"></p>
             </div>
+            <button class="btn-ghost" id="btn-reset">&#8592; Analyze another</button>
+        </div>
 
-            <article class="panel">
-                <h2>Bullet Quality</h2>
-                <div id="bullet-scores" class="bullet-list"></div>
-            </article>
-        </section>
-    </main>
+        <div class="results-layout">
+            <aside class="score-card">
+                <p class="sc-label">ATS Compatibility</p>
+
+                <div class="ring-wrap">
+                    <svg viewBox="0 0 130 130">
+                        <circle class="ring-bg" cx="65" cy="65" r="58" />
+                        <circle class="ring-fg" id="ring-fg" cx="65" cy="65" r="58" />
+                    </svg>
+                    <div class="ring-inner">
+                        <span class="ring-num" id="ring-num">—</span>
+                        <span class="ring-sub">out of 100</span>
+                    </div>
+                </div>
+
+                <div class="verdict-badge" id="verdict-badge"></div>
+
+                <div class="stat-grid">
+                    <div class="stat"><div class="stat-val" id="st-matched">—</div><div class="stat-lbl">Keywords matched</div></div>
+                    <div class="stat"><div class="stat-val" id="st-missing">—</div><div class="stat-lbl">Keywords missing</div></div>
+                    <div class="stat"><div class="stat-val" id="st-skills">—</div><div class="stat-lbl">Skills verified</div></div>
+                    <div class="stat"><div class="stat-val" id="st-bullets">—</div><div class="stat-lbl">Bullets scored</div></div>
+                </div>
+
+                <hr class="divider" />
+                <div class="sim-row">
+                    <span>Semantic similarity</span>
+                    <span class="sim-val" id="sim-score">—</span>
+                </div>
+            </aside>
+
+            <div class="right-col">
+                <div class="tab-bar" role="tablist">
+                    <button class="tab active" data-tab="keywords" role="tab">Keywords</button>
+                    <button class="tab" data-tab="skills" role="tab">Skills</button>
+                    <button class="tab" data-tab="bullets" role="tab">Bullet Quality</button>
+                </div>
+
+                <div class="tab-pane active" id="pane-keywords">
+                    <div class="kw-block">
+                        <p class="kw-heading">Matched &mdash; present in your resume</p>
+                        <div class="kw-row" id="kw-hit"></div>
+                    </div>
+                    <div class="kw-block">
+                        <p class="kw-heading">Missing &mdash; consider adding these</p>
+                        <div class="kw-row" id="kw-miss"></div>
+                    </div>
+                </div>
+
+                <div class="tab-pane" id="pane-skills">
+                    <div id="skills-verified"></div>
+                    <div class="missing-block">
+                        <p class="kw-heading">Missing from resume</p>
+                        <div class="kw-row" id="skills-missing"></div>
+                    </div>
+                </div>
+
+                <div class="tab-pane" id="pane-bullets">
+                    <div id="bullets-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="/static/app.js" defer></script>
 </body>

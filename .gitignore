@@ -5,6 +5,10 @@ __pycache__/
 .hf_cache/
 .DS_Store
 *.log
+.tmp/
+.cache/
 data/*
+!data/.gitkeep
+!data/sample_resume.pdf
 !data/sample_resumes/
 !data/sample_resumes/AI_Engineer_Sample_Resume.pdf

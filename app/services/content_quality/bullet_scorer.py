@@ -2,9 +2,13 @@ import json
 import os
 import re
 import warnings
-from typing import List, Dict, Any, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv():
+        return False
 
 _DEBUG_WARNINGS = os.getenv("CONTENT_QUALITY_DEBUG_WARNINGS", "0") == "1"
 if not _DEBUG_WARNINGS:
@@ -15,29 +19,30 @@ if not _DEBUG_WARNINGS:
         category=FutureWarning,
     )
 
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 
 
 load_dotenv()
 
-# =========================
-# Runtime / model config
-# =========================
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "models/gemini-flash-latest")
 CONTENT_QUALITY_DEBUG_WARNINGS = os.getenv("CONTENT_QUALITY_DEBUG_WARNINGS", "0") == "1"
 
-_GEMINI_ENABLED = bool(GOOGLE_API_KEY)
+_GEMINI_ENABLED = bool(GOOGLE_API_KEY and genai is not None)
 if _GEMINI_ENABLED:
-    genai.configure(api_key=GOOGLE_API_KEY)
-    _gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        _gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+    except Exception:
+        _gemini_model = None
+        _GEMINI_ENABLED = False
 else:
     _gemini_model = None
 
 
-# =========================
-# Scoring config
-# =========================
 BASE_SCORE = 50
 STRONG_VERB_BONUS = 15
 METRIC_BONUS = 20
@@ -45,7 +50,6 @@ TECH_DEPTH_BONUS = 10
 WEAK_PHRASE_PENALTY = 15
 TOO_SHORT_PENALTY = 15
 VAGUE_WORDING_PENALTY = 10
-MIN_BULLET_WORDS = 4
 
 REWRITE_TRIGGER_ISSUES: Set[str] = {
     "weak_action_verb",
@@ -65,13 +69,13 @@ STRONG_ACTION_VERBS = {
     "architected", "reduced", "increased", "scaled", "delivered", "launched",
     "analyzed", "trained", "evaluated", "fine-tuned", "generated", "refactored",
     "streamlined", "modernized", "migrated", "orchestrated", "debugged",
-    "applied", "executed", "partnered", "served"
+    "applied", "executed", "partnered", "served",
 }
 
 WEAK_START_PHRASES = {
     "worked on", "helped", "assisted", "involved in", "responsible for",
     "participated in", "contributed to", "used", "prepared", "experimented with",
-    "collaborated with", "covered"
+    "collaborated with", "covered", "tasked with",
 }
 
 TECH_HINTS = {
@@ -83,17 +87,27 @@ TECH_HINTS = {
     "frontend", "backend", "web", "ui", "ux", "software", "application",
     "microservice", "microservices", "database", "cloud", "ml", "llm",
     "classification", "recommendation", "evaluation", "preprocessing",
-    "vector search", "semantic similarity", "deployment"
+    "vector search", "semantic similarity", "deployment",
+}
+
+ISSUE_LABELS = {
+    "weak_action_verb": "Start with a stronger action verb",
+    "missing_metric": "Add a measurable outcome",
+    "low_technical_depth": "Add more technical detail",
+    "too_short": "Keep the bullet concise and specific",
+    "vague_wording": "Avoid weak openings such as 'worked on' or 'helped'",
 }
 
 
-# =========================
-# Normalization helpers
-# =========================
 def _normalize(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"\s+", " ", text)
     return text
+
+
+def _normalize_bullet(text: str) -> str:
+    text = text.strip().lstrip("-*• ").strip()
+    return re.sub(r"\s+", " ", text)
 
 
 def _extract_first_word(text: str) -> str:
@@ -102,35 +116,14 @@ def _extract_first_word(text: str) -> str:
 
 
 def _is_meaningfully_different(original: str, rewritten: str) -> bool:
-    original_norm = _normalize(original).strip(". ")
-    rewritten_norm = _normalize(rewritten).strip(". ")
-    return original_norm != rewritten_norm
+    return _normalize(original).strip(". ") != _normalize(rewritten).strip(". ")
 
 
-def _extract_actual_bullet_text(text: str) -> Optional[str]:
-    """
-    Returns cleaned bullet text only if the line begins with a bullet marker.
-    Otherwise returns None.
-    """
-    text = text.strip()
-    if not text:
-        return None
-
-    match = re.match(r'^[•\-\*]\s+(.*)$', text)
-    if not match:
-        return None
-
-    bullet_text = match.group(1).strip()
-
-    if len(bullet_text.split()) < MIN_BULLET_WORDS:
-        return None
-
-    return bullet_text
+def _extract_bullet_text(text: str) -> Optional[str]:
+    bullet_text = _normalize_bullet(text)
+    return bullet_text or None
 
 
-# =========================
-# Feature detectors
-# =========================
 def _starts_with_strong_action_verb(text: str) -> bool:
     words = _normalize(text).split()
     if not words:
@@ -145,7 +138,6 @@ def _starts_with_weak_phrase(text: str) -> bool:
 
 def _has_metric(text: str) -> bool:
     normalized = _normalize(text)
-
     metric_patterns = [
         r"\b\d+(\.\d+)?\s*%",
         r"\b\d+(\.\d+)?\b",
@@ -160,8 +152,8 @@ def _has_metric(text: str) -> bool:
         r"\bdays?\b",
         r"\byears?\b",
         r"\bms\b",
+        r"\$",
     ]
-
     return any(re.search(pattern, normalized) for pattern in metric_patterns)
 
 
@@ -176,7 +168,6 @@ def _is_too_short(text: str) -> bool:
 
 def _is_too_vague(text: str) -> bool:
     normalized = _normalize(text)
-
     vague_patterns = [
         r"^worked on\b",
         r"^helped\b",
@@ -190,14 +181,11 @@ def _is_too_vague(text: str) -> bool:
         r"^experimented with\b",
         r"^collaborated with\b",
         r"^covered\b",
+        r"^tasked with\b",
     ]
-
     return any(re.search(pattern, normalized) for pattern in vague_patterns)
 
 
-# =========================
-# Policy helpers
-# =========================
 def _should_rewrite(issues: Set[str]) -> bool:
     return any(issue in REWRITE_TRIGGER_ISSUES for issue in issues)
 
@@ -206,12 +194,8 @@ def _should_prompt_for_metric(issues: Set[str]) -> bool:
     return "missing_metric" in issues
 
 
-# =========================
-# Safe fallbacks
-# =========================
 def _fallback_rewrite(text: str, issues: List[str]) -> str:
-    rewritten = text.strip()
-
+    rewritten = _normalize_bullet(text)
     weak_prefix_map = {
         "worked on": "Developed",
         "helped": "Supported",
@@ -225,11 +209,10 @@ def _fallback_rewrite(text: str, issues: List[str]) -> str:
         "experimented with": "Evaluated",
         "collaborated with": "Partnered with",
         "covered": "Executed",
+        "tasked with": "Delivered",
     }
 
     normalized = _normalize(rewritten)
-
-    # Check longer phrases first
     for phrase in sorted(weak_prefix_map.keys(), key=len, reverse=True):
         replacement = weak_prefix_map[phrase]
         if normalized.startswith(phrase):
@@ -237,7 +220,7 @@ def _fallback_rewrite(text: str, issues: List[str]) -> str:
             rewritten = pattern.sub(replacement, rewritten, count=1)
             break
 
-    if rewritten:
+    if rewritten and rewritten[0].islower():
         rewritten = rewritten[0].upper() + rewritten[1:]
 
     if "too_short" in issues:
@@ -250,7 +233,6 @@ def _fallback_rewrite(text: str, issues: List[str]) -> str:
 
 def _fallback_metric_prompt(text: str) -> str:
     normalized = _normalize(text)
-
     if "api" in normalized or "fastapi" in normalized or "backend" in normalized:
         return (
             "Consider adding a measurable outcome such as API response latency, request throughput, "
@@ -276,16 +258,11 @@ def _fallback_metric_prompt(text: str) -> str:
             "Consider adding measurable outcomes such as ranking quality improvement, retrieval relevance gains, "
             "query latency reduction, or number of documents processed."
         )
-
     return GENERIC_METRIC_PROMPT
 
 
-# =========================
-# LLM helpers
-# =========================
 def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
     text = text.strip()
-
     try:
         return json.loads(text)
     except Exception:
@@ -294,7 +271,6 @@ def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return None
-
     try:
         return json.loads(match.group(0))
     except Exception:
@@ -308,13 +284,6 @@ def _generate_bullet_improvement_with_gemini(
     should_rewrite: bool,
     should_prompt_metric: bool,
 ) -> Dict[str, str]:
-    """
-    Returns:
-    {
-      "rewrite": "... or empty string",
-      "metric_prompt": "... or empty string"
-    }
-    """
     if not _GEMINI_ENABLED or _gemini_model is None:
         return {
             "rewrite": _fallback_rewrite(text, issues) if should_rewrite else "",
@@ -322,7 +291,6 @@ def _generate_bullet_improvement_with_gemini(
         }
 
     avoided_verbs = ", ".join(sorted(used_opening_verbs)) if used_opening_verbs else "none"
-
     prompt = f"""
 You are improving a resume bullet in a safe and factual way.
 
@@ -370,16 +338,14 @@ Return strict JSON only in this format:
         rewrite = rewrite.lstrip("-• ").strip().strip('"').strip("'")
         metric_prompt = metric_prompt.strip().strip('"').strip("'")
 
-        if should_rewrite:
-            if not rewrite or not _is_meaningfully_different(text, rewrite):
-                rewrite = _fallback_rewrite(text, issues)
+        if should_rewrite and (not rewrite or not _is_meaningfully_different(text, rewrite)):
+            rewrite = _fallback_rewrite(text, issues)
 
         if should_prompt_metric and not metric_prompt:
             metric_prompt = _fallback_metric_prompt(text)
 
         if not should_rewrite:
             rewrite = ""
-
         if not should_prompt_metric:
             metric_prompt = ""
 
@@ -387,20 +353,15 @@ Return strict JSON only in this format:
             "rewrite": rewrite,
             "metric_prompt": metric_prompt,
         }
-
     except Exception as exc:
         if CONTENT_QUALITY_DEBUG_WARNINGS:
             print("Gemini content quality error:", exc)
-
         return {
             "rewrite": _fallback_rewrite(text, issues) if should_rewrite else "",
             "metric_prompt": _fallback_metric_prompt(text) if should_prompt_metric else "",
         }
 
 
-# =========================
-# Scoring
-# =========================
 def _score_bullet(text: str) -> Dict[str, Any]:
     score = BASE_SCORE
     issues: List[str] = []
@@ -441,32 +402,32 @@ def _score_bullet(text: str) -> Dict[str, Any]:
         issues.append("vague_wording")
 
     score = max(0, min(100, score))
-    issues = sorted(set(issues))
+    issue_codes = sorted(set(issues))
 
     return {
+        "bullet": text,
         "text": text,
         "score": score,
-        "issues": issues,
-        "rewrite": None,
+        "issues": [ISSUE_LABELS[code] for code in issue_codes if code in ISSUE_LABELS],
+        "issue_codes": issue_codes,
+        "suggested_rewrite": "",
+        "rewrite": "",
         "needs_user_metric": False,
         "metric_prompt": "",
     }
 
 
-# =========================
-# Public API
-# =========================
 def run_content_quality(experience: List[str]) -> Dict[str, Any]:
     bullet_scores = []
     used_opening_verbs: Set[str] = set()
 
     for line in experience:
-        cleaned_bullet = _extract_actual_bullet_text(line)
+        cleaned_bullet = _extract_bullet_text(line)
         if not cleaned_bullet:
             continue
 
         result = _score_bullet(cleaned_bullet)
-        issues = set(result["issues"])
+        issues = set(result["issue_codes"])
 
         should_rewrite = _should_rewrite(issues)
         should_prompt_metric = _should_prompt_for_metric(issues)
@@ -474,7 +435,7 @@ def run_content_quality(experience: List[str]) -> Dict[str, Any]:
         if should_rewrite or should_prompt_metric:
             llm_output = _generate_bullet_improvement_with_gemini(
                 text=result["text"],
-                issues=result["issues"],
+                issues=result["issue_codes"],
                 used_opening_verbs=used_opening_verbs,
                 should_rewrite=should_rewrite,
                 should_prompt_metric=should_prompt_metric,
@@ -485,6 +446,7 @@ def run_content_quality(experience: List[str]) -> Dict[str, Any]:
 
             if should_rewrite and rewrite:
                 result["rewrite"] = rewrite
+                result["suggested_rewrite"] = rewrite
                 opening_verb = _extract_first_word(rewrite)
                 if opening_verb:
                     used_opening_verbs.add(opening_verb)
@@ -496,5 +458,5 @@ def run_content_quality(experience: List[str]) -> Dict[str, Any]:
         bullet_scores.append(result)
 
     return {
-        "bullet_scores": bullet_scores
+        "bullet_scores": bullet_scores,
     }

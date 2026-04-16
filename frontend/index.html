@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResumeIQ</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <h1>ResumeIQ</h1>
+            <p class="hero-copy">
+                Upload a resume, paste a target job description, and review the ATS score,
+                keyword coverage, supported skills, and bullet level feedback in one place.
+            </p>
+        </section>
+
+        <section class="panel form-panel">
+            <form id="analyze-form">
+                <label class="field-label" for="resume">Resume PDF</label>
+                <input id="resume" name="resume" type="file" accept=".pdf" required>
+
+                <label class="field-label" for="job_description">Job description</label>
+                <textarea
+                    id="job_description"
+                    name="job_description"
+                    rows="12"
+                    placeholder="Paste the target job description here"
+                    required
+                ></textarea>
+
+                <div class="actions">
+                    <button id="submit-button" type="submit">Analyze Resume</button>
+                    <button id="load-sample" type="button" class="secondary">Load sample job description</button>
+                </div>
+            </form>
+            <p id="status" class="status"></p>
+        </section>
+
+        <section id="results" class="results hidden">
+            <div class="score-card panel">
+                <p class="score-label">ATS Score</p>
+                <p id="ats-score" class="score-value">0</p>
+                <p class="score-note">The score combines semantic alignment, keyword coverage, skill coverage, and bullet quality.</p>
+            </div>
+
+            <div class="grid-two">
+                <article class="panel">
+                    <h2>Alignment</h2>
+                    <p id="similarity-score" class="metric"></p>
+                    <div>
+                        <h3 class="subsection-title">Matched keywords</h3>
+                        <div id="matched-keywords" class="tag-group"></div>
+                    </div>
+                    <div>
+                        <h3 class="subsection-title">Missing keywords</h3>
+                        <div id="missing-keywords" class="tag-group"></div>
+                    </div>
+                </article>
+
+                <article class="panel">
+                    <h2>Skills</h2>
+                    <div>
+                        <h3 class="subsection-title">Supported skills</h3>
+                        <div id="validated-skills" class="stack"></div>
+                    </div>
+                    <div>
+                        <h3 class="subsection-title">Missing skills</h3>
+                        <div id="missing-skills" class="tag-group"></div>
+                    </div>
+                </article>
+            </div>
+
+            <article class="panel">
+                <h2>Bullet Quality</h2>
+                <div id="bullet-scores" class="bullet-list"></div>
+            </article>
+        </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -14,7 +14,7 @@ def run_full_pipeline(parsed_resume, jd_text):
         "ats_score": ats_score,
         "alignment": alignment,
         "skills": skills,
-        "content_quality": content
+        "content_quality": content,
     }
 
 
@@ -24,24 +24,18 @@ def compute_ats_score(alignment, skills, content):
     content_score = _compute_content_score(content)
 
     final_score = (
-        0.40 * alignment_score +
-        0.35 * skill_score +
-        0.25 * content_score
+        0.40 * alignment_score
+        + 0.35 * skill_score
+        + 0.25 * content_score
     )
 
-    return round(final_score)
+    return round(max(0, min(final_score, 100)))
 
 
 def _compute_alignment_score(alignment):
-    """
-    Combines:
-    - semantic similarity score
-    - keyword coverage score
-    """
     similarity_score = alignment.get("similarity_score", 0.0)
     matched_keywords = alignment.get("matched_keywords", [])
     missing_keywords = alignment.get("missing_keywords", [])
-
     total_keywords = len(matched_keywords) + len(missing_keywords)
 
     if total_keywords == 0:
@@ -51,19 +45,12 @@ def _compute_alignment_score(alignment):
 
     similarity_component = similarity_score * 100
     keyword_component = keyword_coverage * 100
-
-    # Slightly favor semantic similarity, but still reward keyword coverage
-    combined = 0.6 * similarity_component + 0.4 * keyword_component
-    return combined
+    return (0.6 * similarity_component) + (0.4 * keyword_component)
 
 
 def _compute_skill_score(skills):
-    """
-    Percentage of extracted JD skills that were validated by resume evidence.
-    """
     validated_skills = skills.get("validated_skills", [])
     missing_skills = skills.get("missing_skills", [])
-
     total_skills = len(validated_skills) + len(missing_skills)
 
     if total_skills == 0:
@@ -73,13 +60,9 @@ def _compute_skill_score(skills):
 
 
 def _compute_content_score(content):
-    """
-    Average bullet quality score.
-    """
     bullet_scores = content.get("bullet_scores", [])
-
     if not bullet_scores:
-        return 0.0
+        return 50.0
 
     scores = [bullet.get("score", 0) for bullet in bullet_scores]
     return sum(scores) / len(scores)

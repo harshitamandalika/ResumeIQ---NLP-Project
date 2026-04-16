@@ -1,7 +1,8 @@
+import json
 import os
 import re
 import warnings
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 from dotenv import load_dotenv
 
@@ -19,12 +20,13 @@ import google.generativeai as genai
 
 load_dotenv()
 
+# =========================
+# Runtime / model config
+# =========================
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "models/gemini-flash-latest")
 CONTENT_QUALITY_DEBUG_WARNINGS = os.getenv("CONTENT_QUALITY_DEBUG_WARNINGS", "0") == "1"
-REWRITE_THRESHOLD = 55
 
-# Configure Gemini only if key exists
 _GEMINI_ENABLED = bool(GOOGLE_API_KEY)
 if _GEMINI_ENABLED:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -33,17 +35,43 @@ else:
     _gemini_model = None
 
 
+# =========================
+# Scoring config
+# =========================
+BASE_SCORE = 50
+STRONG_VERB_BONUS = 15
+METRIC_BONUS = 20
+TECH_DEPTH_BONUS = 10
+WEAK_PHRASE_PENALTY = 15
+TOO_SHORT_PENALTY = 15
+VAGUE_WORDING_PENALTY = 10
+MIN_BULLET_WORDS = 4
+
+REWRITE_TRIGGER_ISSUES: Set[str] = {
+    "weak_action_verb",
+    "vague_wording",
+    "too_short",
+    "low_technical_depth",
+}
+
+GENERIC_METRIC_PROMPT = (
+    "Consider adding a measurable outcome relevant to this bullet, such as percentage improvement, "
+    "latency reduction, time saved, scale handled, user impact, revenue impact, or reduction in manual steps."
+)
+
 STRONG_ACTION_VERBS = {
     "built", "developed", "designed", "implemented", "engineered", "created",
     "optimized", "improved", "automated", "deployed", "integrated", "led",
     "architected", "reduced", "increased", "scaled", "delivered", "launched",
     "analyzed", "trained", "evaluated", "fine-tuned", "generated", "refactored",
     "streamlined", "modernized", "migrated", "orchestrated", "debugged",
+    "applied", "executed", "partnered", "served"
 }
 
 WEAK_START_PHRASES = {
     "worked on", "helped", "assisted", "involved in", "responsible for",
-    "participated in", "contributed to",
+    "participated in", "contributed to", "used", "prepared", "experimented with",
+    "collaborated with", "covered"
 }
 
 TECH_HINTS = {
@@ -54,21 +82,55 @@ TECH_HINTS = {
     "scikit-learn", "data", "pipeline", "model", "embedding", "rag",
     "frontend", "backend", "web", "ui", "ux", "software", "application",
     "microservice", "microservices", "database", "cloud", "ml", "llm",
+    "classification", "recommendation", "evaluation", "preprocessing",
+    "vector search", "semantic similarity", "deployment"
 }
 
-METRIC_PROMPT = (
-    "Add a real measurable outcome if available, such as percentage improvement, "
-    "latency reduction, time saved, scale handled, revenue impact, user growth, "
-    "or reduction in manual steps."
-)
 
-
+# =========================
+# Normalization helpers
+# =========================
 def _normalize(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"\s+", " ", text)
     return text
 
 
+def _extract_first_word(text: str) -> str:
+    words = _normalize(text).split()
+    return words[0] if words else ""
+
+
+def _is_meaningfully_different(original: str, rewritten: str) -> bool:
+    original_norm = _normalize(original).strip(". ")
+    rewritten_norm = _normalize(rewritten).strip(". ")
+    return original_norm != rewritten_norm
+
+
+def _extract_actual_bullet_text(text: str) -> Optional[str]:
+    """
+    Returns cleaned bullet text only if the line begins with a bullet marker.
+    Otherwise returns None.
+    """
+    text = text.strip()
+    if not text:
+        return None
+
+    match = re.match(r'^[•\-\*]\s+(.*)$', text)
+    if not match:
+        return None
+
+    bullet_text = match.group(1).strip()
+
+    if len(bullet_text.split()) < MIN_BULLET_WORDS:
+        return None
+
+    return bullet_text
+
+
+# =========================
+# Feature detectors
+# =========================
 def _starts_with_strong_action_verb(text: str) -> bool:
     words = _normalize(text).split()
     if not words:
@@ -123,22 +185,31 @@ def _is_too_vague(text: str) -> bool:
         r"^involved in\b",
         r"^participated in\b",
         r"^contributed to\b",
+        r"^used\b",
+        r"^prepared\b",
+        r"^experimented with\b",
+        r"^collaborated with\b",
+        r"^covered\b",
     ]
 
     return any(re.search(pattern, normalized) for pattern in vague_patterns)
 
 
-def _build_metric_prompt(issues: List[str]) -> str:
-    if "missing_metric" in issues:
-        return METRIC_PROMPT
-    return ""
+# =========================
+# Policy helpers
+# =========================
+def _should_rewrite(issues: Set[str]) -> bool:
+    return any(issue in REWRITE_TRIGGER_ISSUES for issue in issues)
 
 
+def _should_prompt_for_metric(issues: Set[str]) -> bool:
+    return "missing_metric" in issues
+
+
+# =========================
+# Safe fallbacks
+# =========================
 def _fallback_rewrite(text: str, issues: List[str]) -> str:
-    """
-    Safe deterministic fallback when Gemini is unavailable or fails.
-    Does not invent metrics.
-    """
     rewritten = text.strip()
 
     weak_prefix_map = {
@@ -149,22 +220,27 @@ def _fallback_rewrite(text: str, issues: List[str]) -> str:
         "responsible for": "Managed",
         "participated in": "Contributed to",
         "contributed to": "Contributed to",
+        "used": "Applied",
+        "prepared": "Built",
+        "experimented with": "Evaluated",
+        "collaborated with": "Partnered with",
+        "covered": "Executed",
     }
 
     normalized = _normalize(rewritten)
 
-    for phrase, replacement in weak_prefix_map.items():
+    # Check longer phrases first
+    for phrase in sorted(weak_prefix_map.keys(), key=len, reverse=True):
+        replacement = weak_prefix_map[phrase]
         if normalized.startswith(phrase):
             pattern = re.compile(rf"^{re.escape(phrase)}", re.IGNORECASE)
             rewritten = pattern.sub(replacement, rewritten, count=1)
             break
 
-    # Capitalize first letter if needed
     if rewritten:
         rewritten = rewritten[0].upper() + rewritten[1:]
 
-    # If bullet is very short and generic, add a modest specificity phrase without inventing metrics
-    if "too_short" in issues and "missing_metric" in issues:
+    if "too_short" in issues:
         if not rewritten.endswith("."):
             rewritten += "."
         rewritten = rewritten.rstrip(".") + " using relevant tools and technologies."
@@ -172,53 +248,162 @@ def _fallback_rewrite(text: str, issues: List[str]) -> str:
     return rewritten
 
 
-def _rewrite_with_gemini(text: str, issues: List[str]) -> str:
+def _fallback_metric_prompt(text: str) -> str:
+    normalized = _normalize(text)
+
+    if "api" in normalized or "fastapi" in normalized or "backend" in normalized:
+        return (
+            "Consider adding a measurable outcome such as API response latency, request throughput, "
+            "number of downstream services supported, or reduction in integration time."
+        )
+    if "nlp" in normalized or "classification" in normalized or "information extraction" in normalized:
+        return (
+            "Consider adding measurable outcomes such as dataset size processed, model accuracy or F1 improvement, "
+            "reduction in manual review effort, or processing time improvement."
+        )
+    if "frontend" in normalized or "ui" in normalized or "web" in normalized:
+        return (
+            "Consider adding measurable outcomes such as page load improvement, reduction in user steps, "
+            "feature adoption, or improvement in user engagement."
+        )
+    if "model" in normalized or "machine learning" in normalized or "deep learning" in normalized:
+        return (
+            "Consider adding measurable outcomes such as model accuracy improvement, inference latency reduction, "
+            "training efficiency gain, or scale of data handled."
+        )
+    if "embedding" in normalized or "vector search" in normalized or "semantic similarity" in normalized:
+        return (
+            "Consider adding measurable outcomes such as ranking quality improvement, retrieval relevance gains, "
+            "query latency reduction, or number of documents processed."
+        )
+
+    return GENERIC_METRIC_PROMPT
+
+
+# =========================
+# LLM helpers
+# =========================
+def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
+    text = text.strip()
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
+def _generate_bullet_improvement_with_gemini(
+    text: str,
+    issues: List[str],
+    used_opening_verbs: Set[str],
+    should_rewrite: bool,
+    should_prompt_metric: bool,
+) -> Dict[str, str]:
     """
-    Gemini rewrite that improves clarity without inventing metrics.
-    Returns plain rewritten bullet text only.
+    Returns:
+    {
+      "rewrite": "... or empty string",
+      "metric_prompt": "... or empty string"
+    }
     """
     if not _GEMINI_ENABLED or _gemini_model is None:
-        return _fallback_rewrite(text, issues)
+        return {
+            "rewrite": _fallback_rewrite(text, issues) if should_rewrite else "",
+            "metric_prompt": _fallback_metric_prompt(text) if should_prompt_metric else "",
+        }
+
+    avoided_verbs = ", ".join(sorted(used_opening_verbs)) if used_opening_verbs else "none"
 
     prompt = f"""
-Rewrite this resume bullet to be stronger and clearer.
+You are improving a resume bullet in a safe and factual way.
 
-Rules:
-- Use a strong action verb.
-- Be concise and professional.
-- Improve clarity and specificity.
-- DO NOT invent metrics, percentages, counts, time savings, business impact, or results.
-- If the original bullet has no metric, keep the rewrite metric-free.
+Tasks:
+1. Rewrite the bullet only if rewrite_needed is true.
+2. Suggest a customized metric prompt only if metric_prompt_needed is true.
+
+Constraints:
+- Do NOT invent metrics, percentages, counts, time savings, business impact, or results.
 - Preserve the original meaning faithfully.
-- Return only one rewritten bullet and nothing else.
+- If rewriting is needed because of weak_action_verb, vague_wording, too_short, or low_technical_depth, the rewrite should be meaningfully improved and should not simply repeat the original bullet.
+- Replace weak opening verbs such as "used", "worked on", "helped", "prepared", "experimented with", "collaborated with", or "covered" with a stronger and more specific alternative when appropriate.
+- Use one strong opening action verb.
+- Try not to reuse these opening verbs if a natural alternative exists: {avoided_verbs}
+- Keep the rewrite concise, professional, and metric-free if the original has no metric.
+- The metric suggestion must describe only the kinds of measurable outcomes the user could add, not actual values.
 
-Bullet:
-{text}
+Inputs:
+bullet: "{text}"
+issues: {issues}
+rewrite_needed: {str(should_rewrite).lower()}
+metric_prompt_needed: {str(should_prompt_metric).lower()}
 
-Issues to address:
-{", ".join(issues)}
+Return strict JSON only in this format:
+{{
+  "rewrite": "string or empty string",
+  "metric_prompt": "string or empty string"
+}}
 """.strip()
 
     try:
         response = _gemini_model.generate_content(prompt)
-        rewritten = (response.text or "").strip()
+        raw = (response.text or "").strip()
+        parsed = _extract_json_block(raw)
 
-        # Remove accidental markdown bullets or quotes
-        rewritten = rewritten.lstrip("-• ").strip().strip('"').strip("'")
+        if not parsed:
+            return {
+                "rewrite": _fallback_rewrite(text, issues) if should_rewrite else "",
+                "metric_prompt": _fallback_metric_prompt(text) if should_prompt_metric else "",
+            }
 
-        if not rewritten:
-            return _fallback_rewrite(text, issues)
+        rewrite = str(parsed.get("rewrite", "") or "").strip()
+        metric_prompt = str(parsed.get("metric_prompt", "") or "").strip()
 
-        return rewritten
+        rewrite = rewrite.lstrip("-• ").strip().strip('"').strip("'")
+        metric_prompt = metric_prompt.strip().strip('"').strip("'")
+
+        if should_rewrite:
+            if not rewrite or not _is_meaningfully_different(text, rewrite):
+                rewrite = _fallback_rewrite(text, issues)
+
+        if should_prompt_metric and not metric_prompt:
+            metric_prompt = _fallback_metric_prompt(text)
+
+        if not should_rewrite:
+            rewrite = ""
+
+        if not should_prompt_metric:
+            metric_prompt = ""
+
+        return {
+            "rewrite": rewrite,
+            "metric_prompt": metric_prompt,
+        }
+
     except Exception as exc:
         if CONTENT_QUALITY_DEBUG_WARNINGS:
-            print("Gemini rewrite error:", exc)
-        return _fallback_rewrite(text, issues)
+            print("Gemini content quality error:", exc)
+
+        return {
+            "rewrite": _fallback_rewrite(text, issues) if should_rewrite else "",
+            "metric_prompt": _fallback_metric_prompt(text) if should_prompt_metric else "",
+        }
 
 
+# =========================
+# Scoring
+# =========================
 def _score_bullet(text: str) -> Dict[str, Any]:
-    score = 50
-    issues = []
+    score = BASE_SCORE
+    issues: List[str] = []
 
     strong_verb = _starts_with_strong_action_verb(text)
     weak_phrase = _starts_with_weak_phrase(text)
@@ -228,61 +413,85 @@ def _score_bullet(text: str) -> Dict[str, Any]:
     too_vague = _is_too_vague(text)
 
     if strong_verb:
-        score += 15
+        score += STRONG_VERB_BONUS
     else:
         issues.append("weak_action_verb")
 
     if weak_phrase:
-        score -= 15
+        score -= WEAK_PHRASE_PENALTY
         if "weak_action_verb" not in issues:
             issues.append("weak_action_verb")
 
     if has_metric:
-        score += 20
+        score += METRIC_BONUS
     else:
         issues.append("missing_metric")
 
     if technical_depth:
-        score += 10
+        score += TECH_DEPTH_BONUS
     else:
         issues.append("low_technical_depth")
 
     if too_short:
-        score -= 15
+        score -= TOO_SHORT_PENALTY
         issues.append("too_short")
 
     if too_vague:
-        score -= 10
+        score -= VAGUE_WORDING_PENALTY
         issues.append("vague_wording")
 
     score = max(0, min(100, score))
-    issues = sorted(list(set(issues)))
+    issues = sorted(set(issues))
 
     return {
         "text": text,
         "score": score,
         "issues": issues,
         "rewrite": None,
-        "needs_user_metric": "missing_metric" in issues,
-        "metric_prompt": _build_metric_prompt(issues),
+        "needs_user_metric": False,
+        "metric_prompt": "",
     }
 
 
+# =========================
+# Public API
+# =========================
 def run_content_quality(experience: List[str]) -> Dict[str, Any]:
     bullet_scores = []
+    used_opening_verbs: Set[str] = set()
 
-    for bullet in experience:
-        bullet = bullet.strip()
-        if not bullet:
+    for line in experience:
+        cleaned_bullet = _extract_actual_bullet_text(line)
+        if not cleaned_bullet:
             continue
 
-        result = _score_bullet(bullet)
+        result = _score_bullet(cleaned_bullet)
+        issues = set(result["issues"])
 
-        if result["score"] < REWRITE_THRESHOLD:
-            result["rewrite"] = _rewrite_with_gemini(
-                result["text"],
-                result["issues"],
+        should_rewrite = _should_rewrite(issues)
+        should_prompt_metric = _should_prompt_for_metric(issues)
+
+        if should_rewrite or should_prompt_metric:
+            llm_output = _generate_bullet_improvement_with_gemini(
+                text=result["text"],
+                issues=result["issues"],
+                used_opening_verbs=used_opening_verbs,
+                should_rewrite=should_rewrite,
+                should_prompt_metric=should_prompt_metric,
             )
+
+            rewrite = llm_output.get("rewrite", "").strip()
+            metric_prompt = llm_output.get("metric_prompt", "").strip()
+
+            if should_rewrite and rewrite:
+                result["rewrite"] = rewrite
+                opening_verb = _extract_first_word(rewrite)
+                if opening_verb:
+                    used_opening_verbs.add(opening_verb)
+
+            if should_prompt_metric and metric_prompt:
+                result["needs_user_metric"] = True
+                result["metric_prompt"] = metric_prompt
 
         bullet_scores.append(result)
 

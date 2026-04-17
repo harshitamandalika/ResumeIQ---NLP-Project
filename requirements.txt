@@ -8,4 +8,3 @@ numpy
 torch
 google-generativeai
 python-dotenv
-python-multipart

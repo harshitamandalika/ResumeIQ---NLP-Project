@@ -3,10 +3,43 @@ from app.services.skill_analysis.skill_validator import run_skill_analysis
 from app.services.content_quality.bullet_scorer import run_content_quality
 
 
+def _normalize_bullet_score(bullet):
+    bullet_text = bullet.get("bullet") or bullet.get("text") or ""
+    suggested_rewrite = bullet.get("suggested_rewrite") or bullet.get("rewrite") or ""
+
+    return {
+        **bullet,
+        "bullet": bullet_text,
+        "text": bullet_text,
+        "suggested_rewrite": suggested_rewrite,
+        "rewrite": suggested_rewrite,
+    }
+
+
+def _prepare_content_quality_for_frontend(content):
+    normalized_scores = []
+    rewrite_candidates = []
+
+    for bullet in content.get("bullet_scores", []):
+        normalized = _normalize_bullet_score(bullet)
+        normalized_scores.append(normalized)
+
+        if normalized["suggested_rewrite"] or normalized.get("needs_user_metric") or normalized.get("metric_prompt"):
+            rewrite_candidates.append(normalized)
+
+    return {
+        **content,
+        "bullet_scores": normalized_scores,
+        "rewrite_candidates": rewrite_candidates,
+    }
+
+
 def run_full_pipeline(parsed_resume, jd_text):
     alignment = run_alignment(parsed_resume["raw_text"], jd_text)
     skills = run_skill_analysis(parsed_resume["sections"], jd_text)
-    content = run_content_quality(parsed_resume["sections"]["experience"])
+    content = _prepare_content_quality_for_frontend(
+        run_content_quality(parsed_resume["sections"]["experience"])
+    )
 
     ats_score = compute_ats_score(alignment, skills, content)
 

@@ -1,6 +1,7 @@
 import re
 from typing import List, Dict, Any, Set
 
+import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 from app.services.alignment.sbert_similarity import (
@@ -132,7 +133,10 @@ def _contains_variant(text: str, skill: str) -> bool:
 
 def _semantic_match_score(skill: str, text: str) -> float:
     embeddings = sbert_model.encode([skill, text])
-    score = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
+    score = cosine_similarity(
+        np.asarray([embeddings[0]]),
+        np.asarray([embeddings[1]]),
+    )[0][0]
     return float(score)
 
 
@@ -164,6 +168,10 @@ def _find_skill_evidence(skill: str, experience_lines: List[str]) -> List[str]:
     return _dedupe_keep_order(evidence)
 
 
+def _summarize_evidence(evidence_lines: List[str]) -> str:
+    return evidence_lines[0] if evidence_lines else ""
+
+
 def run_skill_analysis(sections: Dict[str, Any], jd_text: str) -> Dict[str, Any]:
     """
     Input:
@@ -177,14 +185,14 @@ def run_skill_analysis(sections: Dict[str, Any], jd_text: str) -> Dict[str, Any]
       "validated_skills": [
         {
           "skill": "python",
-          "evidence": [...],
-          "source": ["skills_section", "experience"]
+                    "evidence": "Built REST APIs using FastAPI for an NLP application.",
+                    "evidence_lines": [...],
+                    "source": ["experience"]
         }
       ],
       "missing_skills": ["docker"]
     }
     """
-    resume_skills = _normalize_resume_skills(sections.get("skills", []))
     experience_lines = sections.get("experience", [])
 
     target_skills = _extract_target_skills(jd_text)
@@ -193,20 +201,14 @@ def run_skill_analysis(sections: Dict[str, Any], jd_text: str) -> Dict[str, Any]
     missing_skills = []
 
     for skill in target_skills:
-        found_in_skills_section = skill in resume_skills
-        evidence = _find_skill_evidence(skill, experience_lines)
+        evidence_lines = _find_skill_evidence(skill, experience_lines)
 
-        if found_in_skills_section or evidence:
-            sources = []
-            if found_in_skills_section:
-                sources.append("skills_section")
-            if evidence:
-                sources.append("experience")
-
+        if evidence_lines:
             validated_skills.append({
                 "skill": skill,
-                "evidence": evidence,
-                "source": sources,
+                "evidence": _summarize_evidence(evidence_lines),
+                "evidence_lines": evidence_lines,
+                "source": ["experience"],
             })
         else:
             missing_skills.append(skill)

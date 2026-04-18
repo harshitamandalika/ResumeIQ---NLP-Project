@@ -4,7 +4,11 @@ import re
 import warnings
 from typing import List, Dict, Any, Optional, Set
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv():
+        return False
 
 _DEBUG_WARNINGS = os.getenv("CONTENT_QUALITY_DEBUG_WARNINGS", "0") == "1"
 if not _DEBUG_WARNINGS:
@@ -15,7 +19,10 @@ if not _DEBUG_WARNINGS:
         category=FutureWarning,
     )
 
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 
 
 load_dotenv()
@@ -28,9 +35,13 @@ GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "models/gemini-flash-latest")
 CONTENT_QUALITY_DEBUG_WARNINGS = os.getenv("CONTENT_QUALITY_DEBUG_WARNINGS", "0") == "1"
 
 _GEMINI_ENABLED = bool(GOOGLE_API_KEY)
-if _GEMINI_ENABLED:
-    genai.configure(api_key=GOOGLE_API_KEY)
-    _gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+if _GEMINI_ENABLED and genai is not None:
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        _gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+    except Exception:
+        _gemini_model = None
+        _GEMINI_ENABLED = False
 else:
     _gemini_model = None
 

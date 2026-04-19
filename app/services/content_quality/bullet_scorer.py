@@ -231,8 +231,8 @@ def _fallback_rewrite(text: str, issues: List[str]) -> str:
         "responsible for": "Managed",
         "participated in": "Contributed to",
         "contributed to": "Contributed to",
-        "used": "Applied",
-        "prepared": "Built",
+        "used": "Implemented",
+        "prepared": "Developed",
         "experimented with": "Evaluated",
         "collaborated with": "Partnered with",
         "covered": "Executed",
@@ -251,12 +251,46 @@ def _fallback_rewrite(text: str, issues: List[str]) -> str:
     if rewritten:
         rewritten = rewritten[0].upper() + rewritten[1:]
 
+    if "missing_metric" in issues and not _has_metric(rewritten):
+        rewritten = rewritten.rstrip(". ") + _fallback_metric_template_clause(rewritten)
+
     if "too_short" in issues:
         if not rewritten.endswith("."):
             rewritten += "."
         rewritten = rewritten.rstrip(".") + " using relevant tools and technologies."
 
     return rewritten
+
+
+def _fallback_metric_template_clause(text: str) -> str:
+    normalized = _normalize(text)
+
+    if "api" in normalized or "fastapi" in normalized or "backend" in normalized:
+        return (
+            ", improving [response latency / throughput / integration time] by "
+            "[X% / Y ms] across [N] downstream services or workflows."
+        )
+    if "frontend" in normalized or "ui" in normalized or "web" in normalized:
+        return (
+            ", improving [page load time / adoption / task completion rate] by "
+            "[X%] for [N] users or sessions."
+        )
+    if "nlp" in normalized or "classification" in normalized or "information extraction" in normalized:
+        return (
+            ", improving [accuracy / F1 / processing time] by [X%] across [N] documents or samples."
+        )
+    if "model" in normalized or "machine learning" in normalized or "deep learning" in normalized:
+        return (
+            ", improving [model accuracy / inference latency / training efficiency] by "
+            "[X% / Y ms] on [N] requests or samples."
+        )
+    if "embedding" in normalized or "vector search" in normalized or "semantic similarity" in normalized:
+        return (
+            ", improving [retrieval relevance / ranking quality / query latency] by "
+            "[X% / Y ms] across [N] queries or documents."
+        )
+
+    return ", driving [measurable outcome] by [X% / Y units] across [project scope]."
 
 
 def _fallback_metric_prompt(text: str) -> str:
@@ -349,6 +383,7 @@ Constraints:
 - Use one strong opening action verb.
 - Try not to reuse these opening verbs if a natural alternative exists: {avoided_verbs}
 - Keep the rewrite concise, professional, and metric-free if the original has no metric.
+- If metric_prompt_needed is true, prefer a fill-in template rewrite with bracketed placeholders such as [X%], [Y ms], [N users], or [N services] instead of generic paraphrasing.
 - The metric suggestion must describe only the kinds of measurable outcomes the user could add, not actual values.
 
 Inputs:

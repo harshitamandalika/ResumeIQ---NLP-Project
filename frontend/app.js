@@ -327,6 +327,7 @@ function renderBullets(bullets) {
         const scoreClass = score >= 70 ? 'good' : score >= 45 ? 'warn' : 'bad';
         const bulletText = getBulletText(bullet);
         const suggestedRewrite = getSuggestedRewrite(bullet);
+        const rewriteLabel = bullet.needs_user_metric ? 'Suggested rewrite template' : 'Suggested rewrite';
 
         const issuesHtml = bullet.issues && bullet.issues.length
             ? `<div>
@@ -339,7 +340,7 @@ function renderBullets(bullets) {
 
         const rewriteHtml = suggestedRewrite
             ? `<div class="bc-rewrite">
-                     <div class="bc-rewrite-label">Suggested rewrite</div>
+                     <div class="bc-rewrite-label">${escHtml(rewriteLabel)}</div>
                      <div class="bc-rewrite-text">${escHtml(suggestedRewrite)}</div>
                  </div>`
             : '';
